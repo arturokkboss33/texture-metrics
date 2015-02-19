@@ -13,6 +13,136 @@
 #include "opencv2/contrib/contrib.hpp"
 #include "opencv2/core/core.hpp"
 
+std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions, int k_size, float* thresh, std::vector< std::vector<float> > kernels)
+{
+	std::vector<cv::Mat> diff_im_vec;
+		
+	//+compute the threshold value fo the image
+	cv::Scalar mean, stddev;
+	cv::meanStdDev(query_im, mean, stddev);
+	*thresh = stddev.val[0]/2;
+	
+	//===DEBUGGING===//
+	//print image std/threshold
+	std::cout << "mean: " << mean.val[0] << std::endl;
+	std::cout << "std: " << stddev.val[0] << std::endl;
+	//===//
+	
+	//+global parameters to convolve kernels with the image
+	cv::Point anchor;
+	double delta = 0.;
+	cv::Ptr<cv::FilterEngine> im_filter;
+	
+	for(int c = 0; c < 2; c++) //this is just to stack the diff_im in more convenvient manner
+	{
+		for(int d = 0; d < no_directions; d++)
+		{
+			for(int i = 0; i < (k_size+1); i++)
+			{
+				//===DEBUGGING===//
+				std::cout << "* " << d << " * " << (d*(k_size+1)+i) << std::endl;
+				//===//
+				cv::Mat col_kernel = cv::Mat( kernels.at( (d*(k_size+1)+i) ) );
+				cv::Mat diff_im = cv::Mat(query_im.size(),query_im.type());
+				cv::Mat diff_im_comp = cv::Mat(query_im.size(),query_im.type());
+				cv::Mat ker;
+				cv::Mat tmp_query_im;
+				switch(d)
+				{
+					//===NOTE: to convolve matrixes it is necessary to do zero padding
+					//in the edges of the source image. The fcn im_filter only does
+					//this in the right and bottom edges of the images. Thus, instead
+					//of using fcn copyMakeBorder, images were flipped across y or x
+					//then convolved and then flipped back ===//
+					 
+					case 0: //diff-im with horizontal kernels
+						anchor = cv::Point(0,0);
+						ker = col_kernel.reshape(0,1);
+						if(c==0){
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(query_im, diff_im);
+							diff_im_vec.push_back(diff_im);
+						}else{
+							cv::flip(query_im, tmp_query_im, 1);
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(tmp_query_im, diff_im_comp);
+							cv::flip(diff_im_comp, diff_im_comp, 1);
+							diff_im_vec.push_back(diff_im_comp);
+						}
+						break;
+						
+					case 1: //diff-im with vertical kernel
+							anchor = cv::Point(0,0);
+							ker = col_kernel;
+							if(c==0){
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(query_im, diff_im);
+							diff_im_vec.push_back(diff_im);
+						}else{						
+							cv::flip(query_im, tmp_query_im, 0);
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(tmp_query_im, diff_im_comp);
+							cv::flip(diff_im_comp, diff_im_comp, 0);
+							diff_im_vec.push_back(diff_im_comp);
+						}
+						break;
+					
+					case 2: //diff-im with 45° downwards kernel
+						anchor = cv::Point(0,0);
+						ker = col_kernel.reshape(0,i+2);
+						if(c==0){
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(query_im, diff_im);
+							diff_im_vec.push_back(diff_im);
+						}else{
+							cv::flip(query_im, tmp_query_im, 1);
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(tmp_query_im, diff_im_comp);
+							cv::flip(diff_im_comp, diff_im_comp, 1);
+							diff_im_vec.push_back(diff_im_comp);
+						}
+						break;
+						
+					case 3: //diff-im with +45 kernel
+						anchor = cv::Point(i+1,i+1);
+						ker = col_kernel.reshape(0,i+2);
+						if(c==0){
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(query_im, diff_im);
+							diff_im_vec.push_back(diff_im);
+						}else{
+							cv::flip(query_im, tmp_query_im, 1);
+							im_filter = cv::createLinearFilter(query_im.type(), ker.type(), ker, anchor, 
+								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
+							im_filter->apply(tmp_query_im, diff_im_comp);
+							cv::flip(diff_im_comp, diff_im_comp, 1);
+							diff_im_vec.push_back(diff_im_comp);
+						}
+						break;
+						
+					default:
+						std::cout << "Invalid direction (2)" << std::endl;
+				}
+				~diff_im;
+				~ker;
+				~col_kernel;
+				~tmp_query_im;
+			}
+		}
+	}
+	std::cout << diff_im_vec.size() << std::endl;
+	
+	return diff_im_vec;
+	
+}
+
 void compute_LRIa(int no_directions, int k_size, float thresh, std::vector<cv::Mat> diff_im_vec, cv::Mat& histograms)
 {
 	
@@ -98,6 +228,7 @@ void compute_LRIa(int no_directions, int k_size, float thresh, std::vector<cv::M
 	
 }
 
+//*** MAIN METHOD ***//
 int main ( int argc, char *argv[] )
 {
 	//receive query and ground-truth image
@@ -162,6 +293,7 @@ int main ( int argc, char *argv[] )
 	}
 	
 	//===DEBUGGING===//
+	//print the computed kernels
 	for(std::vector< std::vector<float> >::iterator it = kernels.begin(); it != kernels.end(); ++it)
 	{
 		std::vector<float> tmp = *it;
@@ -173,127 +305,14 @@ int main ( int argc, char *argv[] )
 	}
 	//===//
 	
+
 	//++with the kernels, compute the difference images
 	cv::Rect roi = cv::Rect(0,0,10,10);
 	cv::Mat test_im = query_im(roi);
 	test_im.convertTo(test_im, CV_32FC1);
 	
-	//+compute the threshold value fo the image
-	cv::Scalar mean, stddev;
-	cv::meanStdDev(test_im, mean, stddev);
-	thresh = stddev.val[0]/2;
-	std::cout << "mean: " << mean.val[0] << std::endl;
-	std::cout << "std: " << stddev.val[0] << std::endl;
-	//+global parameters to convolve kernels with the image
-	cv::Point anchor;
-	double delta = 0.;
-	std::vector< cv::Mat > difference_images; 
-	cv::Ptr<cv::FilterEngine> im_filter;
-	
-	for(int c = 0; c < 2; c++) //this is just to stack the diff_im in more convenvient manner
-	{
-		for(int d = 0; d < no_directions; d++)
-		{
-			for(int i = 0; i < (k_size+1); i++)
-			{
-				//===DEBUGGING===//
-				std::cout << "* " << d << " * " << (d*(k_size+1)+i) << std::endl;
-				//===//
-				cv::Mat col_kernel = cv::Mat( kernels.at( (d*(k_size+1)+i) ) );
-				cv::Mat diff_im = cv::Mat(test_im.size(),test_im.type());
-				cv::Mat diff_im_comp = cv::Mat(test_im.size(),test_im.type());
-				cv::Mat ker;
-				cv::Mat tmp_test_im;
-				switch(d)
-				{
-					//===NOTE: to convolve matrixes it is necessary to do zero padding
-					//in the edges of the source image. The fcn im_filter only does
-					//this in the right and bottom edges of the images. Thus, instead
-					//of using fcn copyMakeBorder, images were flipped across y or x
-					//then convolved and then flipped back ===//
-					 
-					case 0: //diff-im with horizontal kernels
-						anchor = cv::Point(0,0);
-						ker = col_kernel.reshape(0,1);
-						if(c==0){
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(test_im, diff_im);
-							difference_images.push_back(diff_im);
-						}else{
-							cv::flip(test_im, tmp_test_im, 1);
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(tmp_test_im, diff_im_comp);
-							cv::flip(diff_im_comp, diff_im_comp, 1);
-							difference_images.push_back(diff_im_comp);
-						}
-						break;
-						
-					case 1: //diff-im with vertical kernel
-							anchor = cv::Point(0,0);
-							ker = col_kernel;
-							if(c==0){
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(test_im, diff_im);
-							difference_images.push_back(diff_im);
-						}else{						
-							cv::flip(test_im, tmp_test_im, 0);
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(tmp_test_im, diff_im_comp);
-							cv::flip(diff_im_comp, diff_im_comp, 0);
-							difference_images.push_back(diff_im_comp);
-						}
-						break;
-					
-					case 2: //diff-im with 45° downwards kernel
-						anchor = cv::Point(0,0);
-						ker = col_kernel.reshape(0,i+2);
-						if(c==0){
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(test_im, diff_im);
-							difference_images.push_back(diff_im);
-						}else{
-							cv::flip(test_im, tmp_test_im, 1);
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(tmp_test_im, diff_im_comp);
-							cv::flip(diff_im_comp, diff_im_comp, 1);
-							difference_images.push_back(diff_im_comp);
-						}
-						break;
-						
-					case 3: //diff-im with +45 kernel
-						anchor = cv::Point(i+1,i+1);
-						ker = col_kernel.reshape(0,i+2);
-						if(c==0){
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(test_im, diff_im);
-							difference_images.push_back(diff_im);
-						}else{
-							cv::flip(test_im, tmp_test_im, 1);
-							im_filter = cv::createLinearFilter(test_im.type(), ker.type(), ker, anchor, 
-								delta, cv::BORDER_CONSTANT, cv::BORDER_CONSTANT, cv::Scalar(0));
-							im_filter->apply(tmp_test_im, diff_im_comp);
-							cv::flip(diff_im_comp, diff_im_comp, 1);
-							difference_images.push_back(diff_im_comp);
-						}
-						break;
-						
-					default:
-						std::cout << "Invalid direction (2)" << std::endl;
-				}
-				~diff_im;
-				~ker;
-				~col_kernel;
-				~tmp_test_im;
-			}
-		}
-	}
+	std::vector<cv::Mat> difference_images( compute_diff_im(test_im, no_directions, k_size, &thresh, kernels) );
+	std::cout << difference_images.size() << std::endl;
 	
 	//===DEBUGGING===//	
 	//print the difference images
@@ -309,9 +328,10 @@ int main ( int argc, char *argv[] )
 	}
 	//===//
 	
-	cv::Mat histograms(0,2*k_size+1, CV_32SC1);
-	compute_LRIa(no_directions, k_size, thresh, difference_images, histograms);
 	
+	//+++ HISTOGRAM COMPUTATION +++
+	cv::Mat histograms(0,2*k_size+1, CV_32SC1);
+	compute_LRIa(no_directions, k_size, thresh, difference_images, histograms);	
 	
 	//===DEBUGGING===//	
 	//print obtained histograms
@@ -319,9 +339,10 @@ int main ( int argc, char *argv[] )
 	{
 		std::cout << histograms.row(r) << std::endl;
 		std::cout << "***" << std::endl;
-
 	}
 	//===//
+	
+	
 		
 	return 0;
 }

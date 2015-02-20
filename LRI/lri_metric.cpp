@@ -22,11 +22,13 @@ std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions,
 	cv::meanStdDev(query_im, mean, stddev);
 	*thresh = stddev.val[0]/2;
 	
+	/*
 	//===DEBUGGING===//
 	//print image std/threshold
 	std::cout << "mean: " << mean.val[0] << std::endl;
 	std::cout << "std: " << stddev.val[0] << std::endl;
 	//===//
+	*/
 	
 	//+global parameters to convolve kernels with the image
 	cv::Point anchor;
@@ -40,7 +42,7 @@ std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions,
 			for(int i = 0; i < (k_size+1); i++)
 			{
 				//===DEBUGGING===//
-				std::cout << "* " << d << " * " << (d*(k_size+1)+i) << std::endl;
+				//std::cout << "* " << d << " * " << (d*(k_size+1)+i) << std::endl;
 				//===//
 				cv::Mat col_kernel = cv::Mat( kernels.at( (d*(k_size+1)+i) ) );
 				cv::Mat diff_im = cv::Mat(query_im.size(),query_im.type());
@@ -137,7 +139,7 @@ std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions,
 			}
 		}
 	}
-	std::cout << diff_im_vec.size() << std::endl;
+	//std::cout << diff_im_vec.size() << std::endl;
 	
 	return diff_im_vec;
 	
@@ -225,16 +227,40 @@ void compute_LRIa(int no_directions, int k_size, float thresh, std::vector<cv::M
 		//std::cout << hist << std::endl;
 		histograms.push_back(hist);
 	}
-	
+	/*
+	//===DEBUGGING===//	
+	//print obtained histograms
+	for(int r = 0; r < histograms.rows; r++)
+	{
+		std::cout << histograms.row(r) << std::endl;
+		std::cout << "***" << std::endl;
+	}
+	//===//
+	*/
 }
 
+void compute_norm_feat_vec(const cv::Mat& mul_feat, cv::Mat& feat_vec)
+{
+	feat_vec = mul_feat.reshape(0,1);
+	feat_vec.convertTo(feat_vec, CV_32FC1);
+	normalize(feat_vec, feat_vec, 1, 0, cv::NORM_L1, -1, cv::Mat() );
+	
+	//===DEBUGGING===//	
+	//print feature vectors
+	//std::cout << feat_vec << std::endl;
+	//===//	
+}
+
+//====================================================================================================================================
 //*** MAIN METHOD ***//
 int main ( int argc, char *argv[] )
 {
 	//receive query and ground-truth image
 	//===NOTE: specify type of image in imread, otherwise opencv creates matrix with 3 channels===
 	cv::Mat query_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
-	cv::Mat baseline_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p006.png", CV_LOAD_IMAGE_GRAYSCALE);
+	cv::Mat baseline_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/rug1/rug1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
+	query_im.convertTo(query_im, CV_32FC1);
+	baseline_im.convertTo(baseline_im, CV_32FC1);
 	
 	//+++INITIAL PARAMETERS+++
 	int k_size = 2; //size limit of the area to analyze
@@ -292,6 +318,7 @@ int main ( int argc, char *argv[] )
 		}
 	}
 	
+	/*
 	//===DEBUGGING===//
 	//print the computed kernels
 	for(std::vector< std::vector<float> >::iterator it = kernels.begin(); it != kernels.end(); ++it)
@@ -304,16 +331,32 @@ int main ( int argc, char *argv[] )
 		std::cout << std::endl;
 	}
 	//===//
-	
+	*/
 
 	//++with the kernels, compute the difference images
-	cv::Rect roi = cv::Rect(0,0,10,10);
-	cv::Mat test_im = query_im(roi);
-	test_im.convertTo(test_im, CV_32FC1);
+	//cv::Rect roi = cv::Rect(0,0,10,10);
+	//cv::Mat test_im = query_im(roi);
+	//test_im.convertTo(test_im, CV_32FC1);
 	
-	std::vector<cv::Mat> difference_images( compute_diff_im(test_im, no_directions, k_size, &thresh, kernels) );
-	std::cout << difference_images.size() << std::endl;
+	//+++DIFFERENCE IMAGE AND HISTOGRAM COMPUTATION+++
+	cv::Mat histograms_query(0,2*k_size+1, CV_32SC1);
+	cv::Mat histograms_base(0,2*k_size+1, CV_32SC1);
+	std::vector<cv::Mat> difference_images_query( compute_diff_im(query_im, no_directions, k_size, &thresh, kernels) );
+	compute_LRIa(no_directions, k_size, thresh, difference_images_query, histograms_query);
+	std::vector<cv::Mat> difference_images_base( compute_diff_im(baseline_im, no_directions, k_size, &thresh, kernels) );
+	compute_LRIa(no_directions, k_size, thresh, difference_images_base, histograms_base);
 	
+	//+++HISTOGRAM COMPARISON+++
+	cv::Mat feature_query, feature_base;
+	compute_norm_feat_vec(histograms_query, feature_query);
+	compute_norm_feat_vec(histograms_base, feature_base);
+	
+	//===NOTE: The similiraity score using BHATACHARYYA ranges from 0 to 1
+	//where 0 indicates that two images are the same
+	double score = compareHist(feature_query, feature_base, CV_COMP_BHATTACHARYYA);
+	std::cout << "Similarity score: " << score << std::endl;
+	
+	/*
 	//===DEBUGGING===//	
 	//print the difference images
 	std::cout << test_im << std::endl;
@@ -327,21 +370,7 @@ int main ( int argc, char *argv[] )
 		std::cout << "***" << std::endl;
 	}
 	//===//
-	
-	
-	//+++ HISTOGRAM COMPUTATION +++
-	cv::Mat histograms(0,2*k_size+1, CV_32SC1);
-	compute_LRIa(no_directions, k_size, thresh, difference_images, histograms);	
-	
-	//===DEBUGGING===//	
-	//print obtained histograms
-	for(int r = 0; r < histograms.rows; r++)
-	{
-		std::cout << histograms.row(r) << std::endl;
-		std::cout << "***" << std::endl;
-	}
-	//===//
-	
+	*/
 	
 		
 	return 0;

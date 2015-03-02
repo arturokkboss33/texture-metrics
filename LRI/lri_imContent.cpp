@@ -62,7 +62,7 @@ std::vector< std::vector<float> > create_kernels(int no_directions, int k_size)
 			kernels.push_back(data);
 		}
 	}
-	
+	/*
 	//===DEBUGGING===//
 	//print the computed kernels
 	for(std::vector< std::vector<float> >::iterator it = kernels.begin(); it != kernels.end(); ++it)
@@ -75,7 +75,7 @@ std::vector< std::vector<float> > create_kernels(int no_directions, int k_size)
 		std::cout << std::endl;
 	}
 	//===//
-	
+	*/
 	
 	return kernels;
 }
@@ -90,13 +90,13 @@ std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions,
 	cv::meanStdDev(query_im, mean, stddev);
 	*thresh = stddev.val[0]*thresh_alpha;
 	
-	/*
+	
 	//===DEBUGGING===//
 	//print image std/threshold
-	std::cout << "mean: " << mean.val[0] << std::endl;
-	std::cout << "std: " << stddev.val[0] << std::endl;
+	//std::cout << "mean: " << mean.val[0] << std::endl;
+	//std::cout << "std: " << stddev.val[0] << std::endl;
 	//===//
-	*/
+	
 	
 	//+global parameters to convolve kernels with the image
 	cv::Point anchor;
@@ -309,6 +309,7 @@ void compute_LRIa(int no_directions, int k_size, float thresh, std::vector<cv::M
 	/*
 	//===DEBUGGING===//	
 	//print obtained histograms
+	std::cout << "Raw Histograms: " << std::endl;
 	for(int r = 0; r < histograms.rows; r++)
 	{
 		std::cout << histograms.row(r) << std::endl;
@@ -330,6 +331,181 @@ void compute_norm_feat_vec(const cv::Mat& mul_feat, cv::Mat& feat_vec)
 	//===//	
 }
 
+std::vector<cv::Mat> extract_patches(const cv::Mat& test_im, int patchesx, int patchesy)
+{
+	std::vector<cv::Mat> patches;
+	
+	//++SELECT THE PATCHES FROM THE IMAGE++//
+	for(int i = 0; i < patchesy; i++)
+	{
+		for(int j = 0; j < patchesx; j++)
+		{
+			int col_width = test_im.cols/patchesx;
+			int row_width = test_im.rows/patchesy;
+			int col_pos = j*col_width;
+			int row_pos = i*row_width;
+
+			col_width = ( (test_im.cols-col_pos)<(2*col_width) ? (test_im.cols-col_pos):col_width );
+			row_width = ( (test_im.cols-row_pos)<(2*row_width) ? (test_im.rows-row_pos):row_width );
+			
+			//===DEBUGGING===//
+			//print ROI parameters
+			//std::cout << "* " << col_pos << " " << col_width << " " << row_pos << " " << row_width;
+			//std::cout << std::endl;
+			//===//
+			
+			cv::Rect roi = cv::Rect(col_pos, row_pos, col_width, row_width);
+			cv::Mat tmp_patch = test_im(roi);
+			patches.push_back(tmp_patch);
+		}
+	}
+	
+	return patches;
+}
+
+double text_global_impurity(const cv::Mat& simMat)
+{
+	double imp = 0.;
+	double norm_fac = 0.;
+	
+	for(int row = 1; row < simMat.rows; row++)
+	{
+		for(int col = 0; col < row; col++)
+		{			
+			imp += (double)simMat.at<float>(row,col);
+			norm_fac = 1.;
+			
+			//imp += pow( (double)simMat.at<float>(row,col), 2.);
+			//norm_fac += (double)simMat.at<float>(row,col);
+		}
+	}
+	
+	imp = imp / norm_fac;
+	
+	return imp;
+		
+}
+
+double text_region_impurity(const cv::Mat& simMat, int patchesx, int patchesy)
+{
+	double imp = 0.;
+	int coor_patch1[2], coor_patch2[2];
+	double inv_total_dist = 0.;
+	double norm_fac = 0.;
+	double max_patch_dist = sqrt( pow((double)(patchesx-1),2.) + pow((double)(patchesy-1),2.) ) ;
+	double exp_c = 3.;
+	//std::cout << max_patch_dist << std::endl;
+	
+	
+	for(int row = 1; row < simMat.rows; row++)
+	{
+		for(int col = 0; col < row; col++)
+		{
+			coor_patch1[0] = row/patchesx; //row divided by no of patches
+			coor_patch1[1] = row%patchesx; //mod with no patches
+			coor_patch2[0] = col/patchesx; //row divided by no of patches
+			coor_patch2[1] = col%patchesx; //mod with no patches
+			
+			//std::cout << coor_patch1[0] << " " << coor_patch1[1] << " "
+			//	<< coor_patch2[0] << " " << coor_patch2[1] << " " << std::endl;
+			
+			double dist = pow((double)(coor_patch1[0]-coor_patch2[0]),2.);
+			dist += pow((double)(coor_patch1[1]-coor_patch2[1]),2.);
+			//dist = sqrt(dist) / max_patch_dist;	
+			
+			//gaussian damping
+			dist = sqrt(dist);
+			dist = (-exp_c/max_patch_dist)*(dist-1.);
+			dist = exp(dist);		
+			//std::cout << dist << std::endl;
+			
+			//imp = imp + ((double)simMat.at<float>(row,col)/dist);
+			//norm_fac += (1/dist);
+			
+			//gaussian damping
+			imp = imp + ((double)simMat.at<float>(row,col)*dist);
+			norm_fac += dist;
+			
+			//imp = imp + ( pow( (double)simMat.at<float>(row,col), 2.) / dist );
+			//norm_fac += ((double)simMat.at<float>(row,col) / dist);
+		}
+	}
+	
+	imp = imp / norm_fac;
+	
+	return imp;
+}
+
+double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_size, float* thresh, float thresh_alpha, 
+	std::vector< std::vector<float> > kernels, int patchesx, int patchesy)
+{
+	double text_entropy = 0.;
+	
+	//++EXTRACT PATCHES FROM THE IMAGE++//
+	std::vector<cv::Mat> patches(extract_patches(test_im, patchesx, patchesy));
+	
+	//++COMPUTE DIFFERENCE IMAGES AND HISTOGRAMS++//
+	std::vector<cv::Mat> hist_vec;
+	for(std::vector<cv::Mat>::size_type i = 0; i != patches.size(); i++)
+	{
+		cv::Mat tmp_hist(0,2*k_size+1, CV_32SC1);
+		cv::Mat tmp_featvec;
+		std::vector<cv::Mat> difference_images_patch( compute_diff_im(patches[i], no_directions, k_size, thresh, thresh_alpha, kernels) );
+		
+		//Compute LRIa
+		compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+		compute_norm_feat_vec(tmp_hist, tmp_featvec);
+		hist_vec.push_back(tmp_featvec);
+	}
+	
+	//++HISTOGRAM COMPARISON++//
+	//+CREATE SIMILARITY MATRIX BETWEEN THE PATCHES+//
+	//===NOTE: only the lower triangle sub-matrix of this matrix contains values
+	//this is done to make the element-access and traversal easier===//
+	cv::Mat simMat((int)hist_vec.size(), (int)hist_vec.size(), CV_32FC1, cv::Scalar(0.));
+	
+	for(int row = 1; row < simMat.rows; row++)
+	{
+		for(int col = 0; col < row; col++)
+		{
+			double score = compareHist(hist_vec.at(row), hist_vec.at(col), CV_COMP_BHATTACHARYYA);
+			simMat.at<float>(row,col) = score;
+			//std::cout << score << std::endl;
+		}
+	}
+	
+	/*
+	//===DEBUGGING===//
+	//print simmilarity matrix
+	std::cout << "Simmilarity matrix" << std::endl;
+	for(int row = 0; row < simMat.rows; row++)
+	{
+		std::cout << simMat.row(row) << std::endl;
+	}
+	//===//
+	*/
+	
+	//+++COMPUTE GLOBAL IMPURITY+++//
+	double global_impurity = text_global_impurity(simMat);
+	std::cout << "Global impurity: " << global_impurity << std::endl;
+	
+	//+++COMPUTE REGION-BASED IMPURITY+++//
+	double weighted_impurity = text_region_impurity(simMat, patchesx, patchesy);
+	std::cout << "Weighted impurity: " << weighted_impurity << std::endl;
+	
+	/*
+	//+++MAP TO VELOCITIES++//
+	double cp = 0.5;
+	double tp = 12;
+	double vel = cp*tan(tp*weighted_impurity);
+	std::cout << "Velocity: " << vel << std::endl;
+	*/
+	
+	
+	
+	return text_entropy;
+}
+
 //====================================================================================================================================
 //*** MAIN METHOD ***//
 int main ( int argc, char *argv[] )
@@ -343,14 +519,20 @@ int main ( int argc, char *argv[] )
 	int k_size = atoi(argv[2]);
 	float thresh = 0.;
 	float thresh_alpha = atof(argv[3]);
+	int no_patchesx = atoi(argv[4]);
+	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
-	
-	cv::Mat base_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
-	base_im.convertTo(base_im, CV_32FC1);
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//
 	std::vector< std::vector<float> > kernels( create_kernels(no_directions, k_size) );
 	
+	//+++DIVIDE THE IMAGE INTO PATCHES AND COMPUTE THE INTRA-SIMMILARITY+++//
+	compute_text_entropy(test_im, no_directions, k_size, &thresh, thresh_alpha, kernels, no_patchesx, no_patchesy);
+	
+	
+	//+++
+	
+	/*
 	//+++DIFFERENCE IMAGE AND HISTOGRAM COMPUTATION+++//
 	cv::Mat histograms_query(0,2*k_size+1, CV_32SC1);
 	cv::Mat histograms_base(0,2*k_size+1, CV_32SC1);
@@ -368,7 +550,7 @@ int main ( int argc, char *argv[] )
 	//where 0 indicates that two images are the same ===//
 	double score = compareHist(feature_query, feature_base, CV_COMP_BHATTACHARYYA);
 	std::cout << "Similarity score: " << score << std::endl;
-	
+	*/
 	
 
 	return 0;

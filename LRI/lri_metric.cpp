@@ -257,13 +257,13 @@ int main ( int argc, char *argv[] )
 {
 	//receive query and ground-truth image
 	//===NOTE: specify type of image in imread, otherwise opencv creates matrix with 3 channels===
-	cv::Mat query_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
-	cv::Mat baseline_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/rug1/rug1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
+	cv::Mat query_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p004.png", CV_LOAD_IMAGE_GRAYSCALE);
+	cv::Mat baseline_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
 	query_im.convertTo(query_im, CV_32FC1);
 	baseline_im.convertTo(baseline_im, CV_32FC1);
 	
 	//+++INITIAL PARAMETERS+++
-	int k_size = 2; //size limit of the area to analyze
+	int k_size = 4; //size limit of the area to analyze
 	float thresh = 0.; //value that determines if a pixel is an edge
 	
 	//+++CREATION OF DIFFERENCE IMAGES+++
@@ -352,7 +352,7 @@ int main ( int argc, char *argv[] )
 	compute_norm_feat_vec(histograms_base, feature_base);
 	
 	//===NOTE: The similiraity score using BHATACHARYYA ranges from 0 to 1
-	//where 0 indicates that two images are the same
+	//where 0 indicates that two images are the same ===//
 	double score = compareHist(feature_query, feature_base, CV_COMP_BHATTACHARYYA);
 	std::cout << "Similarity score: " << score << std::endl;
 	

@@ -220,6 +220,7 @@ std::vector<cv::Mat> compute_diff_im(const cv::Mat& query_im, int no_directions,
 	//===//
 	*/
 	
+	
 	return diff_im_vec;
 	
 }
@@ -317,6 +318,96 @@ void compute_LRIa(int no_directions, int k_size, float thresh, std::vector<cv::M
 	}
 	//===//
 	*/
+}
+
+void compute_LRId(int no_directions, int k_size, float thresh, std::vector<cv::Mat> diff_im_vec, cv::Mat& histograms)
+{
+	//std::cout << thresh << std::endl;
+	
+	for(int d = 0; d < no_directions*2; d++)
+	{
+		cv::Mat hist(1,2*k_size+1, CV_32SC1, cv::Scalar(0)); //values range is from -K to K
+		
+		for(int pixr = (k_size+1); pixr < (diff_im_vec.at(0).rows-(k_size+1)); pixr++)
+		{
+			for(int pixc = (k_size+1); pixc < (diff_im_vec.at(1).cols-(k_size+1)); pixc++)
+			{
+				int pix_count = 0;
+				bool pix_count_flag = true;
+				
+				for(int sz = 0; sz < (k_size+1) && pix_count_flag == true; sz++)
+				{
+					//obtain pixel-dif value from the correspondant matrix
+					cv::Mat diff_im = diff_im_vec.at((d*(k_size+1))+sz);
+					float val = diff_im.at<float>(pixr,pixc);
+					
+					if(std::abs(val) >= thresh) //if the current pixel is smaller or greater by at least T
+					{
+						int hist_pos = std::min(pix_count+1,k_size)%k_size;
+						
+						if(val < 0) //the neighbor is greater
+						{	hist.at<int>(0,k_size+hist_pos) += 1; }
+						else
+						{	hist.at<int>(0,k_size-hist_pos) += 1; }
+						
+						pix_count_flag = false;
+					}
+					else
+					{	pix_count++; }
+				}
+				if(pix_count_flag) //if the size limit was reached
+				{	hist.at<int>(0,k_size) += 1; }
+								
+			}//|-- evaluate the next pixel
+		}//|||||-- evaluate the next pixel
+		
+		//insert the resultant histogram that represents direction d
+		//std::cout << hist << std::endl;
+		histograms.push_back(hist);
+		
+	} //compute next direction histogram
+	
+	/*
+	//===DEBUGGING===//	
+	//print obtained histograms
+	std::cout << "Raw Histograms: " << std::endl;
+	for(int r = 0; r < histograms.rows; r++)
+	{
+		std::cout << histograms.row(r) << std::endl;
+		std::cout << "***" << std::endl;
+	}
+	//===//
+	*/
+	
+	
+}
+
+double compute_intensity_pen(const cv::Mat& base_mat, const cv::Mat& query_mat)
+{
+	double penalization = 0.;
+	double tmin = 10.; //intensity difference minimum
+	double pl = 2; 	//severity of the penalization; the greater the value
+					//the greater the severity of the penalization
+	double val_range = 256; //256 because we use gray-scale images
+	
+	//compute the mean value for each image
+	cv::Scalar base_mean, query_mean;
+	base_mean = cv::mean(base_mat);
+	query_mean = cv::mean(query_mat);
+	
+	
+	double mean_dif = std::abs(base_mean.val[0]-query_mean.val[0]);
+	//the next formula applies (1/1-x^2) in order to increase the value
+	//as the differnce in intensity decreases
+	penalization = 1/(1-pow((std::max(tmin,mean_dif)/val_range), pl));
+	
+	//===DEBUGGING===//
+	//std::cout << base_mean << " " << query_mean << " " << mean_dif << std::endl;
+	//std::cout << penalization << std::endl;
+	//===//
+	
+	return penalization;	
+	
 }
 
 void compute_norm_feat_vec(const cv::Mat& mul_feat, cv::Mat& feat_vec)
@@ -437,7 +528,7 @@ double text_region_impurity(const cv::Mat& simMat, int patchesx, int patchesy)
 }
 
 double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_size, float* thresh, float thresh_alpha, 
-	std::vector< std::vector<float> > kernels, int patchesx, int patchesy)
+	std::vector< std::vector<float> > kernels, int patchesx, int patchesy, int mode, bool flag_intensity_pen)
 {
 	double text_entropy = 0.;
 	
@@ -453,10 +544,20 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 		std::vector<cv::Mat> difference_images_patch( compute_diff_im(patches[i], no_directions, k_size, thresh, thresh_alpha, kernels) );
 		
 		//Compute LRIa
-		compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+		if(mode == 0)
+		{
+			compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+		}
+		else
+		{
+			compute_LRId(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+		}
+		
 		compute_norm_feat_vec(tmp_hist, tmp_featvec);
 		hist_vec.push_back(tmp_featvec);
+		
 	}
+	
 	
 	//++HISTOGRAM COMPARISON++//
 	//+CREATE SIMILARITY MATRIX BETWEEN THE PATCHES+//
@@ -469,10 +570,14 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 		for(int col = 0; col < row; col++)
 		{
 			double score = compareHist(hist_vec.at(row), hist_vec.at(col), CV_COMP_BHATTACHARYYA);
-			simMat.at<float>(row,col) = score;
+			if(flag_intensity_pen)
+				simMat.at<float>(row,col) = score*compute_intensity_pen(patches.at(row),patches.at(col));
+			else
+				simMat.at<float>(row,col) = score;
 			//std::cout << score << std::endl;
 		}
 	}
+	
 	
 	/*
 	//===DEBUGGING===//
@@ -485,6 +590,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	//===//
 	*/
 	
+	
 	//+++COMPUTE GLOBAL IMPURITY+++//
 	double global_impurity = text_global_impurity(simMat);
 	std::cout << "Global impurity: " << global_impurity << std::endl;
@@ -492,6 +598,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	//+++COMPUTE REGION-BASED IMPURITY+++//
 	double weighted_impurity = text_region_impurity(simMat, patchesx, patchesy);
 	std::cout << "Weighted impurity: " << weighted_impurity << std::endl;
+	
 	
 	/*
 	//+++MAP TO VELOCITIES++//
@@ -516,18 +623,28 @@ int main ( int argc, char *argv[] )
 	cv::Mat test_im = cv::imread(test_im_name.c_str(), CV_LOAD_IMAGE_GRAYSCALE);
 	test_im.convertTo(test_im, CV_32FC1);
 	
+	/*
+	//just for testing
+	cv::Mat query_im = cv::imread("/home/arturokkboss33/DataSets/Gustaf/floor1/floor1-a-p003.png", CV_LOAD_IMAGE_GRAYSCALE);
+	cv::Rect roi = cv::Rect(0,0,10,10);
+	cv::Mat test_im = query_im(roi);
+	test_im.convertTo(test_im, CV_32FC1);
+	*/
+	
 	int k_size = atoi(argv[2]);
 	float thresh = 0.;
 	float thresh_alpha = atof(argv[3]);
 	int no_patchesx = atoi(argv[4]);
 	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
+	int mode = 1;
+	bool penalty = true;
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//
 	std::vector< std::vector<float> > kernels( create_kernels(no_directions, k_size) );
 	
 	//+++DIVIDE THE IMAGE INTO PATCHES AND COMPUTE THE INTRA-SIMMILARITY+++//
-	compute_text_entropy(test_im, no_directions, k_size, &thresh, thresh_alpha, kernels, no_patchesx, no_patchesy);
+	compute_text_entropy(test_im, no_directions, k_size, &thresh, thresh_alpha, kernels, no_patchesx, no_patchesy, mode, penalty);
 	
 	
 	//+++

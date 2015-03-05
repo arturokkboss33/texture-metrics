@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include <string>
+#include <bitset>
 #include <stdlib.h>
 //opencv libraries
 #include "opencv2/highgui/highgui.hpp"
@@ -13,6 +14,15 @@
 #include "opencv2/nonfree/nonfree.hpp"
 #include "opencv2/contrib/contrib.hpp"
 #include "opencv2/core/core.hpp"
+
+template<std::size_t N>
+bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
+{
+    for (int i = N-1; i >= 0; i--) {
+        if (x[i] ^ y[i]) return y[i];
+    }
+    return false;
+}
 
 std::vector< std::vector<float> > create_kernels(int no_directions, int k_size)
 {
@@ -382,6 +392,100 @@ void compute_LRId(int no_directions, int k_size, float thresh, std::vector<cv::M
 	
 }
 
+void compute_LBPbasic(int no_directions, int k_size, std::vector<cv::Mat> diff_im_vec, cv::Mat& histograms)
+{
+	int no_pix_neigh = 8;
+	cv::Mat hist(1, pow(2,(double)no_pix_neigh), CV_32SC1, cv::Scalar(0)); //values can be 2^8 patterns
+	
+	for(int pixr = (k_size+1); pixr < (diff_im_vec.at(0).rows-(k_size+1)); pixr++)
+	{
+		for(int pixc = (k_size+1); pixc < (diff_im_vec.at(1).cols-(k_size+1)); pixc++)
+		{
+			std::bitset<8> code;
+			
+			for(int d = 0; d < no_directions*2; d++)
+			{
+				//obtain pixel-dif value from the correspondant matrix
+				cv::Mat diff_im = diff_im_vec.at((d*(k_size+1)));
+				float val = diff_im.at<float>(pixr,pixc);
+				int shift_pos = 0;
+								
+				//===NOTE: Normally, using the value of d this can be done w/o the case
+				//instruction, but because the kernels where not built as in the LBP order
+				//a case statement is necessary to generate the LBP codes according to the
+				//convention; AGAIN, this is not necessary for the code to work ===//
+				switch(d)
+				{
+					case 0:
+						shift_pos = 0;
+						break;
+					case 1:
+						shift_pos = 2;
+						break;
+					case 2: 
+						shift_pos = 1;
+					case 3:
+						shift_pos = 5;
+						break;
+					case 4:
+						shift_pos = 4;
+						break;
+					case 5:
+						shift_pos = 6;
+						break;
+					case 6:
+						shift_pos = 3;
+						break;
+					case 7:
+						shift_pos = 7;
+						break;
+					default:
+						shift_pos = 0;
+				}
+				
+				if(val <= 0){ code.set(shift_pos,1); }				
+			} //go an look to the next neighbor of the target pixel	
+			
+			//shift the code generated to the least value possible,
+			//to make LBP rotation invariant
+			
+			//std::cout << code << std::endl;
+			
+			std::bitset<1> tmp_bit;
+			std::bitset<8> min_code = code;
+			int bit_shift_cc = 0;
+			do
+			{
+				tmp_bit[0] = code[7];
+				code = code << 1;
+				code[0] = tmp_bit[0];
+				//std::cout << code << std::endl;
+				if(code < min_code)
+					min_code = code;
+				bit_shift_cc++;
+			}while(bit_shift_cc < no_pix_neigh-1);
+			
+			hist.at<int>( 0,(int)(min_code.to_ulong()) ) += 1;
+			
+			//===DEBUGGING===//
+			//std::cout << min_code << std::endl;
+			//std::cout << "***" << std::endl;
+			//===//
+			
+		}//---|
+	}//-------|change pixel indexes
+	
+	histograms.push_back(hist);
+	std::cout << histograms.size() << std::endl;
+	//===DEBUGGING===//
+	//std::cout << hist.row(0) << std::endl;
+	//===//
+	
+	
+	
+	
+}
+
 double compute_intensity_pen(const cv::Mat& base_mat, const cv::Mat& query_mat)
 {
 	double penalization = 0.;
@@ -527,6 +631,66 @@ double text_region_impurity(const cv::Mat& simMat, int patchesx, int patchesy)
 	return imp;
 }
 
+float convert_entropyToVel(double entropy, int metric_mode)
+{
+	float velocity = 0.;
+	
+	//===NOTE: The idea is to map the entropy values to a value between 0 and 1
+	//Depending on the chosen metric, entropy values vary for homogeneous
+	//and non-homogeneous textures. Based on tests, the following parameters
+	//are chosen ===//
+	
+	/*
+	//Inverse sigmoid function------
+	float inflection_point = 0.;
+	float offset = 0.5;
+	float normc = 1.;
+	float eps_c = 0.005;
+	
+	if(metric_mode==0)
+	{	inflection_point = 0.065*2;}
+	else
+	{	inflection_point = 0.105*2;}
+	
+	//compute normalization factor to keep values between 0 and 1
+	normc = inflection_point / eps_c;
+	normc = 2*log(normc); //to make the maximum value 0.5
+	
+	//compute velocity, check logarithm case
+	velocity = entropy/(inflection_point-entropy);
+	if(velocity <= 0)
+		velocity = 1.;
+	else
+		velocity = 1-((log(velocity)/normc)+offset);
+		
+	*/
+	
+	//Linear interpolation
+	float max_ent, min_ent;
+
+	if(metric_mode == 0)
+	{
+		max_ent = 0.115;
+		min_ent = 0.018;
+	}
+	else
+	{
+		max_ent = 0.16;
+		min_ent = 0.024;
+	}
+	
+	velocity = ( (.99/(min_ent-max_ent))*entropy )+ (1.-( (.99*min_ent)/(min_ent-max_ent) ) ) ;
+	
+	//bound velocity
+	if(velocity < 0)
+		velocity = 0.;
+	else if(velocity > 1)
+		velocity = 1.;
+	
+	
+	return velocity;
+}
+
 double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_size, float* thresh, float thresh_alpha, 
 	std::vector< std::vector<float> > kernels, int patchesx, int patchesy, int mode, bool flag_intensity_pen)
 {
@@ -548,13 +712,16 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 		{
 			compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
 		}
-		else
+		else if(mode == 1)
 		{
 			compute_LRId(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
 		}
+		else
+			compute_LBPbasic(no_directions, k_size, difference_images_patch, tmp_hist);
 		
 		compute_norm_feat_vec(tmp_hist, tmp_featvec);
 		hist_vec.push_back(tmp_featvec);
+		
 		
 	}
 	
@@ -579,7 +746,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	}
 	
 	
-	/*
+	
 	//===DEBUGGING===//
 	//print simmilarity matrix
 	std::cout << "Simmilarity matrix" << std::endl;
@@ -588,7 +755,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 		std::cout << simMat.row(row) << std::endl;
 	}
 	//===//
-	*/
+	
 	
 	
 	//+++COMPUTE GLOBAL IMPURITY+++//
@@ -599,6 +766,9 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	double weighted_impurity = text_region_impurity(simMat, patchesx, patchesy);
 	std::cout << "Weighted impurity: " << weighted_impurity << std::endl;
 	
+	//float vel = convert_entropyToVel(weighted_impurity, mode);
+	//std::cout << "Vel: " << vel << std::endl;
+
 	
 	/*
 	//+++MAP TO VELOCITIES++//
@@ -637,8 +807,8 @@ int main ( int argc, char *argv[] )
 	int no_patchesx = atoi(argv[4]);
 	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
-	int mode = 1;
-	bool penalty = true;
+	int mode = 2;
+	bool penalty = false;
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//
 	std::vector< std::vector<float> > kernels( create_kernels(no_directions, k_size) );

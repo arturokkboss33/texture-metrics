@@ -677,12 +677,28 @@ float convert_entropyToVel(double entropy, int metric_mode)
 		min_ent = 0.024;
 		max_ent = 0.175;
 	}
-	else
+	else if(metric_mode == 2)
 	{
 		min_ent = 0.05;
 		max_ent = 0.135;		
 	}
+	else if(metric_mode == 3)
+	{
+		min_ent = 0.05*0.018;
+		max_ent = 0.135*0.115;		
+	}
+	else
+	{
+		min_ent = 0.05*0.024;
+		max_ent = 0.135*0.175;		
+	}
 	
+	
+	//velocity = ( (.99/(min_ent-max_ent))*entropy )+ (1.-( (.99*min_ent)/(min_ent-max_ent) ) ) ;
+	
+	//when using log
+	//max_ent = log(max_ent); min_ent = log(min_ent);
+	//entropy =log(entropy);
 	velocity = ( (.99/(min_ent-max_ent))*entropy )+ (1.-( (.99*min_ent)/(min_ent-max_ent) ) ) ;
 	
 	//bound velocity
@@ -897,8 +913,8 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	//std::cout << log(weighted_impurity) << std::endl;
 
 	
-	//float vel = convert_entropyToVel(weighted_impurity, mode);
-	//std::cout << "Vel: " << vel << std::endl;
+	float vel = convert_entropyToVel(weighted_impurity, mode);
+	std::cout << "Vel: " << vel << std::endl;
 
 	
 	/*
@@ -938,7 +954,7 @@ int main ( int argc, char *argv[] )
 	int no_patchesx = atoi(argv[4]);
 	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
-	int mode = 4;
+	int mode = 3;
 	bool penalty = false;
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//

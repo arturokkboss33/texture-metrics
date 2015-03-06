@@ -14,6 +14,8 @@
 #include "opencv2/nonfree/nonfree.hpp"
 #include "opencv2/contrib/contrib.hpp"
 #include "opencv2/core/core.hpp"
+//defines
+#define LBP_NO_PIXELS 8
 
 template<std::size_t N>
 bool operator<(const std::bitset<N>& x, const std::bitset<N>& y)
@@ -394,14 +396,13 @@ void compute_LRId(int no_directions, int k_size, float thresh, std::vector<cv::M
 
 void compute_LBPbasic(int no_directions, int k_size, std::vector<cv::Mat> diff_im_vec, cv::Mat& histograms)
 {
-	int no_pix_neigh = 8;
-	cv::Mat hist(1, pow(2,(double)no_pix_neigh), CV_32SC1, cv::Scalar(0)); //values can be 2^8 patterns
+	cv::Mat hist(1, pow(2,(double)LBP_NO_PIXELS), CV_32SC1, cv::Scalar(0)); //values can be 2^8 patterns
 	
 	for(int pixr = (k_size+1); pixr < (diff_im_vec.at(0).rows-(k_size+1)); pixr++)
 	{
 		for(int pixc = (k_size+1); pixc < (diff_im_vec.at(1).cols-(k_size+1)); pixc++)
 		{
-			std::bitset<8> code;
+			std::bitset<LBP_NO_PIXELS> code;
 			
 			for(int d = 0; d < no_directions*2; d++)
 			{
@@ -452,18 +453,18 @@ void compute_LBPbasic(int no_directions, int k_size, std::vector<cv::Mat> diff_i
 			//std::cout << code << std::endl;
 			
 			std::bitset<1> tmp_bit;
-			std::bitset<8> min_code = code;
+			std::bitset<LBP_NO_PIXELS> min_code = code;
 			int bit_shift_cc = 0;
 			do
 			{
-				tmp_bit[0] = code[7];
+				tmp_bit[0] = code[LBP_NO_PIXELS-1];
 				code = code << 1;
 				code[0] = tmp_bit[0];
 				//std::cout << code << std::endl;
 				if(code < min_code)
 					min_code = code;
 				bit_shift_cc++;
-			}while(bit_shift_cc < no_pix_neigh-1);
+			}while(bit_shift_cc < LBP_NO_PIXELS-1);
 			
 			hist.at<int>( 0,(int)(min_code.to_ulong()) ) += 1;
 			
@@ -476,12 +477,10 @@ void compute_LBPbasic(int no_directions, int k_size, std::vector<cv::Mat> diff_i
 	}//-------|change pixel indexes
 	
 	histograms.push_back(hist);
-	std::cout << histograms.size() << std::endl;
+	//std::cout << histograms.size() << std::endl;
 	//===DEBUGGING===//
 	//std::cout << hist.row(0) << std::endl;
 	//===//
-	
-	
 	
 	
 }
@@ -670,13 +669,18 @@ float convert_entropyToVel(double entropy, int metric_mode)
 
 	if(metric_mode == 0)
 	{
-		max_ent = 0.115;
 		min_ent = 0.018;
+		max_ent = 0.115;
+	}
+	else if(metric_mode == 1)
+	{
+		min_ent = 0.024;
+		max_ent = 0.175;
 	}
 	else
 	{
-		max_ent = 0.16;
-		min_ent = 0.024;
+		min_ent = 0.05;
+		max_ent = 0.135;		
 	}
 	
 	velocity = ( (.99/(min_ent-max_ent))*entropy )+ (1.-( (.99*min_ent)/(min_ent-max_ent) ) ) ;
@@ -746,7 +750,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	}
 	
 	
-	
+	/*
 	//===DEBUGGING===//
 	//print simmilarity matrix
 	std::cout << "Simmilarity matrix" << std::endl;
@@ -755,7 +759,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 		std::cout << simMat.row(row) << std::endl;
 	}
 	//===//
-	
+	*/
 	
 	
 	//+++COMPUTE GLOBAL IMPURITY+++//
@@ -807,7 +811,7 @@ int main ( int argc, char *argv[] )
 	int no_patchesx = atoi(argv[4]);
 	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
-	int mode = 2;
+	int mode = 0;
 	bool penalty = false;
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//

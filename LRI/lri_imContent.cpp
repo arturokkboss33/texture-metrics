@@ -695,6 +695,77 @@ float convert_entropyToVel(double entropy, int metric_mode)
 	return velocity;
 }
 
+void compute_simMat(const cv::Mat& hist_vec, cv::Mat& simMat, bool flag_intensity_pen, std::vector<cv::Mat> patches)
+{
+	//++HISTOGRAM COMPARISON++//
+	//+CREATE SIMILARITY MATRIX BETWEEN THE PATCHES+//
+	//===NOTE: only the lower triangle sub-matrix of this matrix contains values
+	//this is done to make the element-access and traversal easier===//
+	//cv::Mat simMat((int)hist_vec.size(), (int)hist_vec.size(), CV_32FC1, cv::Scalar(0.));
+	
+	for(int sim_row = 1; sim_row < simMat.rows; sim_row++)
+	{
+		for(int sim_col = 0; sim_col < sim_row; sim_col++)
+		{
+			double score = compareHist(hist_vec.row(sim_row), hist_vec.row(sim_col), CV_COMP_BHATTACHARYYA);
+			if(flag_intensity_pen)
+				simMat.at<float>(sim_row,sim_col) = score*compute_intensity_pen(patches.at(sim_row),patches.at(sim_col));
+			else
+				simMat.at<float>(sim_row,sim_col) = score;
+			//std::cout << score << std::endl;
+		}
+	}
+	
+	/*
+	//===DEBUGGING===//
+	//print simmilarity matrix
+	std::cout << "Simmilarity matrix" << std::endl;
+	for(int row = 0; row < simMat.rows; row++)
+	{
+		std::cout << simMat.row(row) << std::endl;
+	}
+	//===//
+	*/
+		
+}
+
+void compute_combined_simMat(const cv::Mat& hist_vec1, const cv::Mat& hist_vec2, double w1, double w2, 
+	cv::Mat& final_simMat, bool flag_intensity_pen, std::vector<cv::Mat> patches)
+{
+	cv::Mat simMat1((int)hist_vec1.rows, (int)hist_vec1.rows, CV_32FC1, cv::Scalar(0.));
+	cv::Mat simMat2((int)hist_vec2.rows, (int)hist_vec2.rows, CV_32FC1, cv::Scalar(0.));
+	
+	compute_simMat(hist_vec1, simMat1, flag_intensity_pen, patches);		
+	compute_simMat(hist_vec2, simMat2, flag_intensity_pen, patches);	
+	
+	for(int sim_row = 1; sim_row < final_simMat.rows; sim_row++)
+	{
+		for(int sim_col = 0; sim_col < sim_row; sim_col++)
+		{
+			double score = pow( simMat1.at<float>(sim_row, sim_col), w1 ) * pow( simMat2.at<float>(sim_row, sim_col), w2 );
+			if(flag_intensity_pen)
+				score *= compute_intensity_pen(patches.at(sim_row),patches.at(sim_col));
+			
+			final_simMat.at<float>(sim_row, sim_col) = score;
+
+			//std::cout << score << std::endl;
+		}
+	}
+	
+	/*
+	//===DEBUGGING===//
+	//print simmilarity matrix
+	std::cout << "Simmilarity matrix" << std::endl;
+	for(int row = 0; row < final_simMat.rows; row++)
+	{
+		std::cout << final_simMat.row(row) << std::endl;
+	}
+	//===//
+	*/
+
+
+}
+
 double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_size, float* thresh, float thresh_alpha, 
 	std::vector< std::vector<float> > kernels, int patchesx, int patchesy, int mode, bool flag_intensity_pen)
 {
@@ -704,32 +775,83 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	std::vector<cv::Mat> patches(extract_patches(test_im, patchesx, patchesy));
 	
 	//++COMPUTE DIFFERENCE IMAGES AND HISTOGRAMS++//
-	std::vector<cv::Mat> hist_vec;
+	//std::vector<cv::Mat> hist_vec;
+	cv::Mat hist_vec_lri, hist_vec_lbp;
+	//std::cout << hist_vec_lri.empty() << " " << hist_vec_lbp.empty() << std::endl;
+	
 	for(std::vector<cv::Mat>::size_type i = 0; i != patches.size(); i++)
 	{
-		cv::Mat tmp_hist(0,2*k_size+1, CV_32SC1);
+		cv::Mat tmp_hist_lri(0,2*k_size+1, CV_32SC1);
+		cv::Mat tmp_hist_lbp(0, pow(2,(double)LBP_NO_PIXELS), CV_32SC1); //values can be 2^8 patterns
 		cv::Mat tmp_featvec;
 		std::vector<cv::Mat> difference_images_patch( compute_diff_im(patches[i], no_directions, k_size, thresh, thresh_alpha, kernels) );
 		
 		//Compute LRIa
 		if(mode == 0)
 		{
-			compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+			compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist_lri);
 		}
 		else if(mode == 1)
 		{
-			compute_LRId(no_directions, k_size, *thresh, difference_images_patch, tmp_hist);
+			compute_LRId(no_directions, k_size, *thresh, difference_images_patch, tmp_hist_lri);
+		}
+		else if(mode == 2)
+		{
+			compute_LBPbasic(no_directions, k_size, difference_images_patch, tmp_hist_lbp);
+		}
+		else if(mode == 3)
+		{ 
+			compute_LRIa(no_directions, k_size, *thresh, difference_images_patch, tmp_hist_lri);
+			compute_LBPbasic(no_directions, k_size, difference_images_patch, tmp_hist_lbp);
 		}
 		else
-			compute_LBPbasic(no_directions, k_size, difference_images_patch, tmp_hist);
+		{
+			compute_LRId(no_directions, k_size, *thresh, difference_images_patch, tmp_hist_lri);
+			compute_LBPbasic(no_directions, k_size, difference_images_patch, tmp_hist_lbp);
+		}
 		
-		compute_norm_feat_vec(tmp_hist, tmp_featvec);
-		hist_vec.push_back(tmp_featvec);
-		
+		if(mode == 0 || mode == 1)
+		{
+			compute_norm_feat_vec(tmp_hist_lri, tmp_featvec);
+			hist_vec_lri.push_back(tmp_featvec);
+		}
+		else if(mode == 2)
+		{
+			compute_norm_feat_vec(tmp_hist_lbp, tmp_featvec);
+			hist_vec_lbp.push_back(tmp_featvec);
+		}	
+		else
+		{
+			compute_norm_feat_vec(tmp_hist_lri, tmp_featvec);
+			hist_vec_lri.push_back(tmp_featvec);
+			compute_norm_feat_vec(tmp_hist_lbp, tmp_featvec);
+			hist_vec_lbp.push_back(tmp_featvec);
+		}
 		
 	}
 	
+	//std::cout << hist_vec_lri.empty() << " " << hist_vec_lbp.empty() << std::endl;
 	
+	//cv::Mat simMat((int)hist_vec.size(), (int)hist_vec.size(), CV_32FC1, cv::Scalar(0.));
+	double w1 = 1.;
+	double w2 = 1.;
+	cv::Mat hist_vec;
+	int simMat_size = patchesx*patchesy;
+	cv::Mat simMat(simMat_size, simMat_size, CV_32FC1, cv::Scalar(0.));
+	if(mode == 0 || mode == 1)
+	{
+		compute_simMat(hist_vec_lri, simMat, flag_intensity_pen, patches);		
+	}
+	else if(mode == 2)
+	{
+		compute_simMat(hist_vec_lbp, simMat, flag_intensity_pen, patches);		
+	}
+	else
+	{
+		compute_combined_simMat(hist_vec_lri, hist_vec_lbp, w1, w2, simMat, flag_intensity_pen, patches);
+	}	
+
+	/*
 	//++HISTOGRAM COMPARISON++//
 	//+CREATE SIMILARITY MATRIX BETWEEN THE PATCHES+//
 	//===NOTE: only the lower triangle sub-matrix of this matrix contains values
@@ -748,7 +870,7 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 			//std::cout << score << std::endl;
 		}
 	}
-	
+	*/
 	
 	/*
 	//===DEBUGGING===//
@@ -761,14 +883,19 @@ double compute_text_entropy(const cv::Mat& test_im, int no_directions, int k_siz
 	//===//
 	*/
 	
-	
+
 	//+++COMPUTE GLOBAL IMPURITY+++//
 	double global_impurity = text_global_impurity(simMat);
-	std::cout << "Global impurity: " << global_impurity << std::endl;
+	//std::cout << "Global impurity: " << global_impurity << std::endl;
 	
 	//+++COMPUTE REGION-BASED IMPURITY+++//
 	double weighted_impurity = text_region_impurity(simMat, patchesx, patchesy);
-	std::cout << "Weighted impurity: " << weighted_impurity << std::endl;
+	//std::cout << "Weighted impurity: " << weighted_impurity << std::endl;
+	//std::cout << "Log e: " << log(weighted_impurity) << std::endl;
+	//std::cout << "Log 10: " << log10(weighted_impurity) << std::endl;
+	std::cout << weighted_impurity << std::endl;
+	//std::cout << log(weighted_impurity) << std::endl;
+
 	
 	//float vel = convert_entropyToVel(weighted_impurity, mode);
 	//std::cout << "Vel: " << vel << std::endl;
@@ -811,7 +938,7 @@ int main ( int argc, char *argv[] )
 	int no_patchesx = atoi(argv[4]);
 	int no_patchesy = atoi(argv[5]);
 	int no_directions = 4;
-	int mode = 0;
+	int mode = 4;
 	bool penalty = false;
 	
 	//+++CREATE KERNELS FOR DIFFERENCE IMAGES+++//
